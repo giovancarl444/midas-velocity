@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="description" content="Next.js 504 Gateway Timeout on Vercel? Here's the exact diagnostic flow that fixes it in under an hour.">
+<meta name="keywords" content="Next.js 504 error, Vercel timeout, fix 504 gateway timeout, serverless function timeout, Next.js deployment error">
+<meta property="og:title" content="Fix Next.js 504 Errors on Vercel (The Complete Guide)">
+<meta property="og:description" content="504 Gateway Timeout is the most common production failure for Next.js on Vercel. Here's the fix.">
+<meta property="og:type" content="article">
+<meta property="og:url" content="https://giovancarl444.github.io/midas-velocity/blog/nextjs-504-fix.html">
+<title>Fix Next.js 504 Errors on Vercel — Complete Guide</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;background:#0a0a0a;color:#e0e0e0;line-height:1.7;font-size:18px}
+.container{max-width:720px;margin:0 auto;padding:2rem 1.5rem}
+a{color:#4fc3f7;text-decoration:none}
+a:hover{text-decoration:underline}
+h1{font-size:2.5rem;font-weight:800;color:#fff;margin-bottom:1rem;line-height:1.2}
+h2{font-size:1.5rem;font-weight:700;color:#fff;margin:2.5rem 0 1rem}
+h3{font-size:1.15rem;font-weight:600;color:#fff;margin:1.5rem 0 .5rem}
+p{margin-bottom:1.25rem}
+ul,ol{margin:1rem 0 1.5rem 1.5rem}
+li{margin-bottom:.5rem}
+hr{border:0;border-top:1px solid #333;margin:2.5rem 0}
+.codeblock{background:#111;border:1px solid #222;border-radius:8px;padding:1rem;font-family:SFMono-Regular,Consolas,"Liberation Mono",Menlo,monospace;font-size:.875rem;overflow-x:auto;color:#c9d1d9;margin:1rem 0}
+.cta-box{background:#111;border:1px solid #222;border-radius:12px;padding:1.5rem;text-align:center;margin:2.5rem 0}
+.cta-box a{display:inline-block;background:#fff;color:#000;padding:.75rem 2rem;border-radius:8px;font-weight:700;text-decoration:none;margin-top:1rem}
+.nav{margin-bottom:2rem;font-size:.875rem}
+.nav a{color:#888}
+</style>
+</head>
+<body>
+<div class="container">
+  <div class="nav"><a href="../index.html">← Back to Maximus Velocity</a></div>
+
+  <h1>Fix Next.js 504 Errors on Vercel</h1>
+  <p style="color:#888;font-size:.95rem">Published May 2026 · Deployment Engineering</p>
+
+  <p><strong>504 Gateway Timeout</strong> is the most common production failure I see on Vercel. It doesn't happen on localhost. It only hits when real users show up. And when it hits, it hits at the worst possible moment — launch day, campaign traffic, or that Hacker News spike you've been waiting for.</p>
+
+  <p>Here's the diagnostic flow I use to fix it in under an hour.</p>
+
+  <hr>
+
+  <h2>Step 1: Check Function Duration</h2>
+
+  <p>Vercel's default serverless function timeout is <strong>10 seconds</strong> on Hobby, <strong>60 seconds</strong> on Pro, and <strong>300 seconds</strong> on Enterprise. If your API route or SSR page takes longer, Vercel kills it. 504.</p>
+
+  <div class="codeblock">// Check in Vercel Dashboard → Functions → [your function] → Duration
+// Or add logging:
+
+export default async function handler(req, res) {
+  const start = Date.now();
+  // ... your logic
+  console.log(`Duration: ${Date.now() - start}ms`);
+  res.json({ ok: true });
+}</div>
+
+  <p>If you're consistently near the limit, you have three options:</p>
+  <ul>
+    <li><strong>Optimize the function</strong> (add caching, reduce DB queries)</li>
+    <li><strong>Move to Edge Runtime</strong> (faster cold starts, but limited API)</li>
+    <li><strong>Upgrade your plan</strong> (if you genuinely need >10s)</li>
+  </ul>
+
+  <h2>Step 2: Check Memory Limits</h2>
+
+  <p>Default memory is <strong>1024 MB</strong>. If your function exceeds this, Vercel kills it mid-execution. 504.</p>
+
+  <div class="codeblock">// Increase memory in vercel.json
+{
+  "functions": {
+    "api/heavy-task.js": {
+      "maxDuration": 30,
+      "memory": 3008
+    }
+  }
+}</div>
+
+  <h2>Step 3: Fix Cold Starts</h2>
+
+  <p>A cold start on a large function can eat 3-5 seconds before your code even runs. In regions far from your database, add network latency and you're at 8-9 seconds with almost no time left for actual work.</p>
+
+  <p>Fixes:</p>
+  <ul>
+    <li>Pin region to your database region (see <a href="vercel-tax.html">The Vercel Tax</a>)</li>
+    <li>Use Edge Runtime for simple transforms</li>
+    <li>Keep functions warm with cron triggers (if on Pro)</li>
+    <li>Minimize dependencies — bundle size directly impacts cold start time</li>
+  </ul>
+
+  <h2>Step 4: Database Connection Pooling</h2>
+
+  <p>Serverless functions create new connections on every invocation. Without pooling, you'll exhaust your database's connection limit under load. The function hangs waiting for a connection. 504.</p>
+
+  <div class="codeblock">// Use a connection pooler like Prisma Accelerate or @neondatabase/serverless
+import { Pool } from '@neondatabase/serverless';
+const pool = new Pool({ connectionString: process.env.DATABASE_URL });
+
+export default async function handler(req, res) {
+  const client = await pool.connect();
+  // ... query
+  client.release();
+}</div>
+
+  <hr>
+
+  <h2>The 504 Decision Tree</h2>
+
+  <ol>
+    <li>Does it happen on <em>every</em> request or only under load? → Every = code bug. Under load = scaling limit.</li>
+    <li>Does it happen on static pages or dynamic routes? → Static = CDN issue (rare). Dynamic = function issue.</li>
+    <li>Does it correlate with database queries? → Check pooling and query time.</li>
+    <li>Does it happen after deployments? → Cold start + first request = timeout.</li>
+  </ol>
+
+  <hr>
+
+  <div class="cta-box">
+    <h2>Stuck on a 504?</h2>
+    <p>I diagnose these for free. Send me your URL and I'll tell you exactly what's timing out and how to fix it.</p>
+    <a href="../index.html">Get Free Diagnosis →</a>
+  </div>
+</div>
+</body>
+</html>
